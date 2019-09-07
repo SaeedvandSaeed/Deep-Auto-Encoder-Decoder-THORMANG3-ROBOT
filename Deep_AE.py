@@ -11,7 +11,7 @@ from torch.autograd import Variable
 from torchvision.utils import save_image
 
 batch_size = 64
-epochs = 20
+epochs = 10
 no_cuda = False
 seed = 1
 log_interval = 50
@@ -75,6 +75,7 @@ class VAE_CNN(nn.Module):
         self.convh = conv2d_size_out(conv2d_size_out(conv2d_size_out(conv2d_size_out(image_heigh, stride=1), stride=2), stride=1), stride=2)
 
         print(self.convw, self.convh)
+
         # Latent vectors mu and sigma
         self.fc1 = nn.Linear(self.convw * self.convh * 16, 2048)
         self.fc_bn1 = nn.BatchNorm1d(2048)
@@ -176,7 +177,6 @@ def train(epoch):
     train_losses.append(train_loss / len(train_loader_food.dataset))
 
 
-
 def test(epoch):
     model.eval()
     test_loss = 0
@@ -187,23 +187,47 @@ def test(epoch):
             test_loss += loss_mse(recon_batch, data, mu, logvar).item()
             if i == 0:
                 n = min(data.size(0), 8)
+                print('size', recon_batch.size())
+                print('data', data[:1,:,:,:].size())
                 comparison = torch.cat([data[:n],
                                         recon_batch.view(batch_size, 1, image_width, image_heigh)[:n]])
                 save_image(comparison.cpu(),
                            'results/reconstruction_' + str(epoch) + '.png', nrow=n)
 
+                PIC = recon_batch.view(batch_size, 1, image_width, image_heigh)[:1]
+                save_image(PIC,
+                        'results/CODED_' + str(epoch) + '.png', nrow=n)
+
     test_loss /= len(val_loader_food.dataset)
     print('====> Test set loss: {:.4f}'.format(test_loss))
     val_losses.append(test_loss)
 
+#***********************************************************************
+
+loading_checkpoint = True
+MODEL_SAVE = True
+CheckpointPath = os.getcwd() + '/Network/' + 'model.ckpt'
+
+if(loading_checkpoint):
+    checkpoint = torch.load(CheckpointPath)
+    # model.load_state_dict(checkpoint['target_model_state_dict'])
+    # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
 for epoch in range(1, epochs + 1):
-    train(epoch)
+    if(not loading_checkpoint):
+        train(epoch)
     test(epoch)
     with torch.no_grad():
         sample = torch.randn(64, 2048).to(device)
         sample = model.decode(sample).cpu()
         save_image(sample.view(64, 1, image_width, image_heigh),
                    'results/sample_' + str(epoch) + '.png')
+
+if MODEL_SAVE:
+    torch.save({
+        'target_model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        }, CheckpointPath)
 
 plt.figure(figsize=(15,10))
 plt.plot(range(len(train_losses)),train_losses)
