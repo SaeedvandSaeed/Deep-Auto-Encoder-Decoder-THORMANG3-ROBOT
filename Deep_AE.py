@@ -1,6 +1,5 @@
 import matplotlib.pyplot as plt
 import seaborn as sns
-
 import torch
 import os
 from skimage import io, transform
@@ -10,7 +9,7 @@ from torchvision import datasets, transforms
 from torch.autograd import Variable
 from torchvision.utils import save_image
 
-batch_size = 64
+batch_size = 128
 epochs = 10
 no_cuda = False
 seed = 1
@@ -20,37 +19,29 @@ cuda = not no_cuda and torch.cuda.is_available()
 
 torch.manual_seed(seed)
 
-device = torch.device("cuda" if cuda else "cpu")
+device = torch.device("cuda:0" if cuda else "cpu")
 print(device)
 
 kwargs = {'num_workers': 1, 'pin_memory': True} if cuda else {}
 
-# train_root = 'Data/fruits-360/Training'
-# val_root = 'Data/fruits-360/Test'
 train_root = 'frames/test'
 val_root = 'frames/test'
 
-# train_loader_food = torch.utils.data.DataLoader(
-#     datasets.ImageFolder(train_root, transform=transforms.ToTensor()),
-#     batch_size = batch_size, shuffle=True, **kwargs)
-
-# val_loader_food = torch.utils.data.DataLoader(
-#     datasets.ImageFolder(val_root, transform=transforms.ToTensor()),
-#     batch_size = batch_size, shuffle=True, **kwargs)
 image_width = 220
 image_heigh = 160
 
+input_channel = 1
 
-train_loader_food = torch.utils.data.DataLoader(
+train_loader = torch.utils.data.DataLoader(
     datasets.ImageFolder(train_root, \
-    transform=transforms.Compose([transforms.Grayscale(num_output_channels=1),
+    transform=transforms.Compose([transforms.Grayscale(num_output_channels=input_channel), #comment grayscale transform if chanell is 3
     transforms.Resize((image_width, image_heigh)), transforms.ToTensor(),  transforms.Normalize([0.5], [0.5]) ])), 
     batch_size = batch_size, shuffle=True, **kwargs)
-
+#
 
 val_loader_food = torch.utils.data.DataLoader(
     datasets.ImageFolder(val_root,  \
-    transform=transforms.Compose([transforms.Grayscale(num_output_channels=1),
+    transform=transforms.Compose([transforms.Grayscale(num_output_channels=input_channel), 
     transforms.Resize((image_width, image_heigh)), transforms.ToTensor(), transforms.Normalize([0.5], [0.5]) ])), 
     batch_size = batch_size, shuffle=True, **kwargs)
 
@@ -59,7 +50,7 @@ class VAE_CNN(nn.Module):
         super(VAE_CNN, self).__init__()
 
         # Encoder
-        self.conv1 = nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(input_channel, 16, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(16)
         self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(32)
@@ -68,7 +59,7 @@ class VAE_CNN(nn.Module):
         self.conv4 = nn.Conv2d(64, 16, kernel_size=3, stride=2, padding=1, bias=False)
         self.bn4 = nn.BatchNorm2d(16)
 
-        def conv2d_size_out(size,  stride, kernel_size=3, padding = 1):
+        def conv2d_size_out(size,  stride, kernel_size = 3, padding = 1):
             return (size - (kernel_size) + 2 * padding) // stride + 1
             
         self.convw = conv2d_size_out(conv2d_size_out(conv2d_size_out(conv2d_size_out(image_width, stride=1), stride=2), stride=1), stride=2)
@@ -76,26 +67,23 @@ class VAE_CNN(nn.Module):
 
         print(self.convw, self.convh)
 
-        # Latent vectors mu and sigma
         self.fc1 = nn.Linear(self.convw * self.convh * 16, 2048)
         self.fc_bn1 = nn.BatchNorm1d(2048)
         self.fc21 = nn.Linear(2048, 2048)
         self.fc22 = nn.Linear(2048, 2048)
 
-        # Sampling vector
         self.fc3 = nn.Linear(2048, 2048)
         self.fc_bn3 = nn.BatchNorm1d(2048)
         self.fc4 = nn.Linear(2048, self.convw * self.convh * 16)
         self.fc_bn4 = nn.BatchNorm1d(self.convw * self.convh * 16)
 
-        # Decoder
         self.conv5 = nn.ConvTranspose2d(16, 64, kernel_size=3, stride=2, padding=1, output_padding=1, bias=False)
         self.bn5 = nn.BatchNorm2d(64)
         self.conv6 = nn.ConvTranspose2d(64, 32, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn6 = nn.BatchNorm2d(32)
         self.conv7 = nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, output_padding=1, bias=False)
         self.bn7 = nn.BatchNorm2d(16)
-        self.conv8 = nn.ConvTranspose2d(16, 1, kernel_size=3, stride=1, padding=1, bias=False)
+        self.conv8 = nn.ConvTranspose2d(16, input_channel, kernel_size=3, stride=1, padding=1, bias=False)
 
         self.relu = nn.ReLU()
 
@@ -127,7 +115,7 @@ class VAE_CNN(nn.Module):
         conv5 = self.relu(self.bn5(self.conv5(fc4)))
         conv6 = self.relu(self.bn6(self.conv6(conv5)))
         conv7 = self.relu(self.bn7(self.conv7(conv6)))
-        return self.conv8(conv7).view(-1, 1, image_width, image_heigh)
+        return self.conv8(conv7).view(-1, input_channel, image_width, image_heigh)
 
     def forward(self, x):
         mu, logvar = self.encode(x)
@@ -158,7 +146,7 @@ train_losses = []
 def train(epoch):
     model.train()
     train_loss = 0
-    for batch_idx, (data, _) in enumerate(train_loader_food):
+    for batch_idx, (data, _) in enumerate(train_loader):
         data = data.to(device)
         optimizer.zero_grad()
         recon_batch, mu, logvar = model(data)
@@ -168,13 +156,13 @@ def train(epoch):
         optimizer.step()
         if batch_idx % log_interval == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                epoch, batch_idx * len(data), len(train_loader_food.dataset),
-                       100. * batch_idx / len(train_loader_food),
+                epoch, batch_idx * len(data), len(train_loader.dataset),
+                       100. * batch_idx / len(train_loader),
                        loss.item() / len(data)))
 
     print('====> Epoch: {} Average loss: {:.4f}'.format(
-        epoch, train_loss / len(train_loader_food.dataset)))
-    train_losses.append(train_loss / len(train_loader_food.dataset))
+        epoch, train_loss / len(train_loader.dataset)))
+    train_losses.append(train_loss / len(train_loader.dataset))
 
 
 def test(epoch):
@@ -190,11 +178,11 @@ def test(epoch):
                 print('size', recon_batch.size())
                 print('data', data[:1,:,:,:].size())
                 comparison = torch.cat([data[:n],
-                                        recon_batch.view(batch_size, 1, image_width, image_heigh)[:n]])
+                                        recon_batch.view(batch_size, input_channel, image_width, image_heigh)[:n]])
                 save_image(comparison.cpu(),
                            'results/reconstruction_' + str(epoch) + '.png', nrow=n)
 
-                PIC = recon_batch.view(batch_size, 1, image_width, image_heigh)[:1]
+                PIC = recon_batch.view(batch_size, input_channel, image_width, image_heigh)[:1]
                 save_image(PIC,
                         'results/CODED_' + str(epoch) + '.png', nrow=n)
 
@@ -204,7 +192,7 @@ def test(epoch):
 
 #***********************************************************************
 
-loading_checkpoint = True
+loading_checkpoint = False
 MODEL_SAVE = True
 CheckpointPath = os.getcwd() + '/Network/' + 'model.ckpt'
 
@@ -220,7 +208,7 @@ for epoch in range(1, epochs + 1):
     with torch.no_grad():
         sample = torch.randn(64, 2048).to(device)
         sample = model.decode(sample).cpu()
-        save_image(sample.view(64, 1, image_width, image_heigh),
+        save_image(sample.view(64, input_channel, image_width, image_heigh),
                    'results/sample_' + str(epoch) + '.png')
 
 if MODEL_SAVE:
@@ -229,6 +217,7 @@ if MODEL_SAVE:
         'optimizer_state_dict': optimizer.state_dict(),
         }, CheckpointPath)
 
+print("Compleated.")
 plt.figure(figsize=(15,10))
 plt.plot(range(len(train_losses)),train_losses)
 plt.plot(range(len(val_losses)),val_losses)
